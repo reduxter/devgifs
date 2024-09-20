@@ -1,99 +1,39 @@
-import openpyxl
+import xlwings as xw
 import os
-import re
 
-def get_cell_value(workbook_path, sheet_name, cell_reference, visited_cells=None):
-    # Keep track of visited cells to avoid circular references
-    if visited_cells is None:
-        visited_cells = set()
-    
-    # Check if we've already visited this cell (circular reference detection)
-    cell_id = (workbook_path, sheet_name, cell_reference)
-    if cell_id in visited_cells:
-        return workbook_path, sheet_name, cell_reference, "Circular Reference Detected"
-    
-    visited_cells.add(cell_id)
-
-    # Load the workbook from the network or local drive
+def get_cell_values_xlwings(workbook_path, sheet_name, cell_range):
+    """
+    This function uses xlwings to get the values of a range of cells, resolving formulas through Excel.
+    """
+    # Check if the workbook exists
     if not os.path.exists(workbook_path):
         raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
     
-    wb = openpyxl.load_workbook(workbook_path, data_only=False)  # data_only=False to fetch formulas for resolution
-    sheet = wb[sheet_name]
-    
-    # Get the cell
-    cell = sheet[cell_reference]
-    
-    # If the cell contains a value directly (no formula), return it
-    if cell.data_type == 'n' or cell.data_type == 's':  # 'n' for number, 's' for string
-        return workbook_path, sheet_name, cell_reference, cell.value
-    
-    # If the cell contains a formula, we need to resolve it
-    if cell.data_type == 'f':  # 'f' indicates formula
-        formula = cell.value
-        print(f"Formula found in {sheet_name}!{cell_reference}: {formula}")
-        return resolve_formula(workbook_path, sheet_name, formula, visited_cells)
-    
-    return workbook_path, sheet_name, cell_reference, None
-
-
-def resolve_formula(workbook_path, sheet_name, formula, visited_cells):
-    """
-    Handles the resolution of more complex formulas.
-    """
-    # We handle common Excel functions and references in formulas.
-    # Example: '=SUM(Sheet1!A1, Sheet2!B2)' or '=Sheet1!A1 + Sheet2!B2'
-    
-    # Simple pattern to match references in the form 'Sheet1!A1' or '[workbook]Sheet!A1'
-    ref_pattern = r"(\[.+\])?(\w+)!([A-Z]+\d+)"
-    
-    # Find all references in the formula
-    references = re.findall(ref_pattern, formula)
-    resolved_values = []
-    
-    for ref in references:
-        ext_wb, sheet_ref, cell_ref = ref
-        
-        if ext_wb:  # If external workbook is referenced
-            ext_workbook_path = os.path.join(os.path.dirname(workbook_path), ext_wb.strip('[]'))
-            resolved_value = get_cell_value(ext_workbook_path, sheet_ref, cell_ref, visited_cells)
-        else:  # Intra-workbook reference
-            resolved_value = get_cell_value(workbook_path, sheet_ref, cell_ref, visited_cells)
-        
-        resolved_values.append(resolved_value[-1])  # Only keep the final value for calculation
-    
-    # Here you can evaluate the formula, if necessary, based on the resolved values
-    # For example, if the formula was a SUM or simple arithmetic operation
-    evaluated_value = evaluate_formula(formula, resolved_values)
-    
-    return workbook_path, sheet_name, None, evaluated_value
-
-
-def evaluate_formula(formula, resolved_values):
-    """
-    Evaluate the formula with the resolved values. This is basic and may require more advanced
-    handling for complex Excel functions.
-    """
-    # Replace cell references in the formula with the resolved values (assuming simple cases)
-    for value in resolved_values:
-        formula = re.sub(r"[A-Z]+\d+", str(value), formula, count=1)
-    
-    # Simple evaluation using Python's eval (for arithmetic operations)
+    # Open the workbook with xlwings
+    app = xw.App(visible=False)  # We don't need the Excel window to pop up
     try:
-        return eval(formula)
-    except Exception as e:
-        return f"Error evaluating formula: {str(e)}"
+        wb = app.books.open(workbook_path)
+        sheet = wb.sheets[sheet_name]
+        
+        # Get the values of the cells in the range (this will evaluate any formulas)
+        values = sheet.range(cell_range).value
+        
+        # Return the resolved values
+        return workbook_path, sheet_name, cell_range, values
+    
+    finally:
+        wb.close()
+        app.quit()
 
 
-def find_final_value(workbook_path, sheet_name, cell_reference):
+def find_final_values(workbook_path, sheet_name, cell_range):
     """
-    This function starts from the given workbook, sheet, and cell reference,
-    and follows the chain of formulas and references until a plain value is found.
+    This function finds the final values for a given range of cells, resolving any formulas.
     """
     try:
-        workbook, sheet, cell, value = get_cell_value(workbook_path, sheet_name, cell_reference)
-        print(f"Resolved value in: Workbook: {workbook}, Sheet: {sheet}, Cell: {cell}, Value: {value}")
-        return workbook, sheet, cell, value
+        workbook, sheet, cell_range, values = get_cell_values_xlwings(workbook_path, sheet_name, cell_range)
+        print(f"Resolved values in: Workbook: {workbook}, Sheet: {sheet}, Range: {cell_range}, Values: {values}")
+        return workbook, sheet, cell_range, values
     except Exception as e:
         return f"Error encountered: {str(e)}"
 
@@ -101,7 +41,7 @@ def find_final_value(workbook_path, sheet_name, cell_reference):
 # Example usage:
 workbook_path = r'\\network_drive\path\to\your\workbook.xlsx'
 sheet_name = 'Sheet1'
-cell_reference = 'A1'
+cell_range = 'A1:B10'  # Define your range here
 
-result = find_final_value(workbook_path, sheet_name, cell_reference)
-print(f"Final value found in: Workbook: {result[0]}, Sheet: {result[1]}, Cell: {result[2]}, Value: {result[3]}")
+result = find_final_values(workbook_path, sheet_name, cell_range)
+print(f"Final values found in: Workbook: {result[0]}, Sheet: {result[1]}, Range: {result[2]}, Values: {result[3]}")
