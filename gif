@@ -49,6 +49,7 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
     Dim workbookReference As String
     Dim worksheetName As String
     Dim cellReference As String
+    Dim resolvedPath As String
     
     ' Get the formula from the source cell
     formula = sourceCell.Formula
@@ -68,10 +69,17 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
             worksheetName = match.SubMatches(1) ' Extract the worksheet name
             cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Try to open the external workbook
+            ' Use Excel to resolve the full file path via FollowHyperlink
             On Error Resume Next
-            Set extWorkbook = Workbooks.Open(workbookReference, ReadOnly:=True)
+            resolvedPath = ResolveFilePath(workbookReference) ' Custom function to resolve the file path
             On Error GoTo 0
+            
+            ' Try to open the resolved workbook path
+            If resolvedPath <> "" Then
+                On Error Resume Next
+                Set extWorkbook = Workbooks.Open(resolvedPath, ReadOnly:=True)
+                On Error GoTo 0
+            End If
             
             If Not extWorkbook Is Nothing Then
                 ' Get the referenced worksheet and cell
@@ -124,3 +132,14 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
         End If
     End If
 End Sub
+
+' Custom function to resolve file path using Excel's FollowHyperlink to handle network drives and relative paths
+Function ResolveFilePath(ByVal filePath As String) As String
+    Dim fullResolvedPath As String
+    On Error Resume Next
+    ' Attempt to resolve the path using Excel's FollowHyperlink method
+    ThisWorkbook.FollowHyperlink Address:=filePath, NewWindow:=True
+    fullResolvedPath = filePath
+    ResolveFilePath = fullResolvedPath
+    On Error GoTo 0
+End Function
