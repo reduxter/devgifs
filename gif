@@ -49,7 +49,7 @@ def parse_formula_references(formula, current_workbook):
 
 def trace_formula_chain(workbook_path, sheet_name, cell_reference, opened_workbooks, trace=None):
     """
-    Recursively trace the formula chain, following cross-workbook references until a plain value is reached.
+    Recursively trace the formula chain, following cross-workbook references and logging formulas.
     """
     if trace is None:
         trace = []
@@ -74,8 +74,8 @@ def trace_formula_chain(workbook_path, sheet_name, cell_reference, opened_workbo
         'workbook': workbook_path,
         'sheet': sheet_name,
         'cell': cell_reference,
-        'formula': formula,
-        'value': value
+        'formula': formula,  # Log formula (won't evaluate it)
+        'value': value  # Could be None if formula exists (we won't evaluate)
     })
     
     # If the cell has a formula, trace its references
