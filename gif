@@ -40,12 +40,22 @@ def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells
     
     finally:
         # Close the main workbook
+        close_workbooks(opened_workbooks, app)
         wb.close()
-        # Ensure all opened external workbooks are closed
-        for wb_path in opened_workbooks:
-            print(f"Closing workbook: {wb_path}")
-            opened_workbooks[wb_path].close()
         app.quit()
+
+def close_workbooks(opened_workbooks, app):
+    """
+    Gracefully closes the opened external workbooks with error handling to avoid -2147417848 errors.
+    """
+    for wb_path, wb in list(opened_workbooks.items()):
+        try:
+            print(f"Closing workbook: {wb_path}")
+            time.sleep(1)  # Adding a small delay before closing
+            wb.close()
+            del opened_workbooks[wb_path]  # Remove from dictionary once closed
+        except Exception as e:
+            print(f"Error closing workbook {wb_path}: {str(e)}")
 
 def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, app, opened_workbooks, trace=None):
     """
@@ -104,8 +114,12 @@ def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_ce
             
             # If it's an external workbook, ensure it is opened
             if ref_workbook_path not in opened_workbooks:
-                opened_workbooks[ref_workbook_path] = app.books.open(ref_workbook_path)
-                time.sleep(0.5)  # Add a delay to avoid overwhelming Excel
+                try:
+                    opened_workbooks[ref_workbook_path] = app.books.open(ref_workbook_path)
+                    time.sleep(1)  # Add a delay to avoid overwhelming Excel
+                except Exception as e:
+                    print(f"Error opening external workbook {ref_workbook_path}: {str(e)}")
+                    continue
                 
             # Recursively trace the formula in the referenced workbook/sheet/cell
             get_cell_trace_xlwings(ref_workbook_path, ref_sheet, ref_cell, visited_cells, app, opened_workbooks, trace)
