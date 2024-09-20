@@ -3,6 +3,20 @@ import os
 import re
 import time
 
+def retry_operation(func, retries=3, delay=1):
+    """
+    Retries a given function multiple times with a delay in case of COM errors.
+    This helps handle scenarios where Excel is temporarily busy.
+    """
+    for attempt in range(retries):
+        try:
+            return func()
+        except Exception as e:
+            print(f"Retrying due to error: {e}")
+            time.sleep(delay)
+            if attempt == retries - 1:
+                raise
+
 def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells=None, opened_workbooks=None):
     """
     This function handles the tracing of formulas for all the cells in a given range.
@@ -22,10 +36,10 @@ def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells
     if not os.path.exists(workbook_path):
         raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
     
-    # Open the workbook with xlwings
-    app = xw.App(visible=False)  # We don't need the Excel window to pop up
+    # Open the workbook with xlwings, with retry logic to handle Excel's busy state
+    app = xw.App(visible=False)
     try:
-        wb = app.books.open(workbook_path)
+        wb = retry_operation(lambda: app.books.open(workbook_path))
         sheet = wb.sheets[sheet_name]
         
         # Loop through each cell in the range
@@ -39,9 +53,9 @@ def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells
         return trace
     
     finally:
-        # Close the main workbook
+        # Close the main workbook and any opened external workbooks
         close_workbooks(opened_workbooks, app)
-        wb.close()
+        retry_operation(wb.close)  # Close the main workbook with retry logic
         app.quit()
 
 def close_workbooks(opened_workbooks, app):
@@ -52,7 +66,7 @@ def close_workbooks(opened_workbooks, app):
         try:
             print(f"Closing workbook: {wb_path}")
             time.sleep(1)  # Adding a small delay before closing
-            wb.close()
+            retry_operation(wb.close)  # Retry closing the workbook if needed
             del opened_workbooks[wb_path]  # Remove from dictionary once closed
         except Exception as e:
             print(f"Error closing workbook {wb_path}: {str(e)}")
@@ -85,7 +99,7 @@ def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_ce
     if workbook_path in opened_workbooks:
         wb = opened_workbooks[workbook_path]
     else:
-        wb = app.books.open(workbook_path)
+        wb = retry_operation(lambda: app.books.open(workbook_path))
         opened_workbooks[workbook_path] = wb
 
     sheet = wb.sheets[sheet_name]
@@ -115,7 +129,7 @@ def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_ce
             # If it's an external workbook, ensure it is opened
             if ref_workbook_path not in opened_workbooks:
                 try:
-                    opened_workbooks[ref_workbook_path] = app.books.open(ref_workbook_path)
+                    opened_workbooks[ref_workbook_path] = retry_operation(lambda: app.books.open(ref_workbook_path))
                     time.sleep(1)  # Add a delay to avoid overwhelming Excel
                 except Exception as e:
                     print(f"Error opening external workbook {ref_workbook_path}: {str(e)}")
