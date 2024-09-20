@@ -69,13 +69,16 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
             worksheetName = match.SubMatches(1) ' Extract the worksheet name
             cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Use Excel to resolve the full file path via FollowHyperlink
-            On Error Resume Next
-            resolvedPath = ResolveFilePath(workbookReference) ' Custom function to resolve the file path
-            On Error GoTo 0
+            ' Ensure that we have the full path, not just a partial one
+            If Not IsFullPath(workbookReference) Then
+                workbookReference = Application.ThisWorkbook.Path & "\" & workbookReference
+            End If
             
-            ' Try to open the resolved workbook path
-            If resolvedPath <> "" Then
+            ' Try to resolve the path and check if it's already open
+            resolvedPath = ResolveFilePath(workbookReference)
+            If IsWorkbookOpen(resolvedPath) Then
+                Set extWorkbook = Workbooks(resolvedPath)
+            Else
                 On Error Resume Next
                 Set extWorkbook = Workbooks.Open(resolvedPath, ReadOnly:=True)
                 On Error GoTo 0
@@ -99,8 +102,10 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
                     TraceReferences refCell, logSheet, logRow
                 End If
                 
-                ' Close the external workbook after processing
-                extWorkbook.Close False
+                ' Close the external workbook if it was opened
+                If Not IsWorkbookOpen(resolvedPath) Then
+                    extWorkbook.Close False
+                End If
             Else
                 ' Log if the external workbook couldn't be opened
                 logSheet.Cells(logRow, 1).Value = "Unable to open workbook: " & workbookReference
@@ -133,13 +138,31 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
     End If
 End Sub
 
-' Custom function to resolve file path using Excel's FollowHyperlink to handle network drives and relative paths
+' Custom function to resolve file path using Excel's ThisWorkbook.Path to resolve relative paths
 Function ResolveFilePath(ByVal filePath As String) As String
     Dim fullResolvedPath As String
-    On Error Resume Next
-    ' Attempt to resolve the path using Excel's FollowHyperlink method
-    ThisWorkbook.FollowHyperlink Address:=filePath, NewWindow:=True
     fullResolvedPath = filePath
     ResolveFilePath = fullResolvedPath
+End Function
+
+' Function to check if a workbook is already open
+Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
+    Dim wb As Workbook
+    On Error Resume Next
+    Set wb = Workbooks(workbookName)
+    If wb Is Nothing Then
+        IsWorkbookOpen = False
+    Else
+        IsWorkbookOpen = True
+    End If
     On Error GoTo 0
+End Function
+
+' Function to check if a path is a full path or a partial path
+Function IsFullPath(ByVal path As String) As Boolean
+    If InStr(1, path, ":", vbTextCompare) > 0 Or InStr(1, path, "\\", vbTextCompare) > 0 Then
+        IsFullPath = True
+    Else
+        IsFullPath = False
+    End If
 End Function
