@@ -28,7 +28,7 @@ def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells
             cell_reference = cell.get_address(False, False)  # Get the address in A1 notation
             print(f"Processing cell: {cell_reference}")  # Progress tracking
             
-            cell_trace = get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells)
+            cell_trace = get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, app)
             trace.extend(cell_trace)  # Append each cell trace to the overall trace
         
         return trace
@@ -37,10 +37,10 @@ def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells
         wb.close()
         app.quit()
 
-def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, trace=None):
+def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, app, trace=None):
     """
     This function uses xlwings to get the formula of a cell and traces the formula references step by step.
-    It returns the complete trace of the formula resolution.
+    It returns the complete trace of the formula resolution, including external workbook references.
     """
     # Initialize the trace if it's not provided
     if trace is None:
@@ -65,8 +65,7 @@ def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_ce
     if not os.path.exists(workbook_path):
         raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
     
-    # Open the workbook with xlwings
-    app = xw.App(visible=False)  # We don't need the Excel window to pop up
+    # Open the workbook with xlwings (we are reusing the same app)
     try:
         wb = app.books.open(workbook_path)
         sheet = wb.sheets[sheet_name]
@@ -92,14 +91,18 @@ def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_ce
             # For each referenced cell, resolve its formula and trace it
             for ref in references:
                 ref_workbook_path, ref_sheet, ref_cell = ref
-                get_cell_trace_xlwings(ref_workbook_path, ref_sheet, ref_cell, visited_cells, trace)
+                
+                # If it's an external workbook, ensure it is opened
+                if not ref_workbook_path in [wb.fullname for wb in app.books]:
+                    app.books.open(ref_workbook_path)  # Open external workbook if not already open
+                
+                # Recursively trace the formula in the referenced workbook/sheet/cell
+                get_cell_trace_xlwings(ref_workbook_path, ref_sheet, ref_cell, visited_cells, app, trace)
         
         return trace
     
     finally:
         wb.close()
-        app.quit()
-
 
 def parse_formula_references(formula, current_workbook):
     """
