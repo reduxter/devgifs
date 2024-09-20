@@ -69,10 +69,14 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
             worksheetName = match.SubMatches(1) ' Extract the worksheet name
             cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Use the full path from the formula without modifying it
-            resolvedPath = workbookReference
+            ' Resolve the file path: only add the current workbook path if it's a relative path
+            If IsFullPath(workbookReference) Then
+                resolvedPath = workbookReference ' Use the full path as-is
+            Else
+                resolvedPath = Application.ThisWorkbook.Path & "\" & workbookReference ' Append current workbook path
+            End If
             
-            ' Check if the workbook is already open
+            ' Try to resolve the path and check if it's already open
             If IsWorkbookOpen(resolvedPath) Then
                 Set extWorkbook = Workbooks(resolvedPath)
             Else
@@ -135,6 +139,13 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
     End If
 End Sub
 
+' Custom function to resolve file path using Excel's ThisWorkbook.Path to resolve relative paths
+Function ResolveFilePath(ByVal filePath As String) As String
+    Dim fullResolvedPath As String
+    fullResolvedPath = filePath
+    ResolveFilePath = fullResolvedPath
+End Function
+
 ' Function to check if a workbook is already open
 Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
     Dim wb As Workbook
@@ -146,4 +157,14 @@ Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
         IsWorkbookOpen = True
     End If
     On Error GoTo 0
+End Function
+
+' Function to check if a path is a full path or a partial path
+Function IsFullPath(ByVal path As String) As Boolean
+    ' Check if the path contains a drive letter (e.g., C:) or UNC path (e.g., \\Server\Share)
+    If InStr(1, path, ":", vbTextCompare) > 0 Or InStr(1, path, "\\", vbTextCompare) > 0 Then
+        IsFullPath = True
+    Else
+        IsFullPath = False
+    End If
 End Function
