@@ -1,4 +1,3 @@
-
 Sub TraceFormulas()
     Dim ws As Worksheet
     Dim cell As Range
@@ -28,45 +27,48 @@ Sub TraceFormulas()
         logSheet.Cells(logRow, 5).Value = cell.Value ' Log the value
         logRow = logRow + 1
         
-        ' If the formula references an external workbook, trace it
+        ' If the formula references another cell or external workbook, trace it
         If formula <> "" And Left(formula, 1) = "=" Then
-            ' Trace any external workbook references found in the formula
-            TraceExternalWorkbookReferences formula, logSheet, logRow
+            ' Trace any internal or external references found in the formula
+            TraceReferences cell, logSheet, logRow
         End If
     Next cell
     
     MsgBox "Formula tracing complete. Check the new workbook for details."
 End Sub
 
-Sub TraceExternalWorkbookReferences(ByVal formula As String, ByRef logSheet As Worksheet, ByRef logRow As Integer)
-    Dim match As Object
-    Dim matches As Object
+Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRef logRow As Integer)
+    Dim formula As String
     Dim extWorkbook As Workbook
     Dim refWorkbookPath As String
     Dim refWorksheet As Worksheet
     Dim refCell As Range
     Dim regex As Object
+    Dim match As Object
+    Dim matches As Object
     Dim workbookReference As String
     Dim worksheetName As String
     Dim cellReference As String
+    
+    ' Get the formula from the source cell
+    formula = sourceCell.Formula
     
     ' Regular expression to capture cross-workbook references (e.g., '[C:\path\to\Workbook.xlsx]Sheet1!A1')
     Set regex = CreateObject("VBScript.RegExp")
     regex.Global = True
     regex.IgnoreCase = True
-    regex.Pattern = "\[(.*?)\](.*?)!([A-Z]+\d+)"
+    regex.Pattern = "\[(.*?)\](.*?)!([A-Z]+\d+)" ' Matches [Workbook]Sheet!A1
     
-    ' Find all workbook references in the formula
+    ' Check if the formula references any external workbooks
     If regex.Test(formula) Then
         Set matches = regex.Execute(formula)
         
-        ' Loop through each match and extract the workbook, sheet, and cell references
         For Each match In matches
-            workbookReference = match.SubMatches(0) ' Full path to the workbook (e.g., C:\path\to\Workbook.xlsx)
-            worksheetName = match.SubMatches(1) ' Sheet name (e.g., Sheet1)
-            cellReference = match.SubMatches(2) ' Cell reference (e.g., A1)
+            workbookReference = match.SubMatches(0) ' Extract the external workbook path
+            worksheetName = match.SubMatches(1) ' Extract the worksheet name
+            cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Attempt to open the external workbook
+            ' Try to open the external workbook
             On Error Resume Next
             Set extWorkbook = Workbooks.Open(workbookReference, ReadOnly:=True)
             On Error GoTo 0
@@ -76,17 +78,17 @@ Sub TraceExternalWorkbookReferences(ByVal formula As String, ByRef logSheet As W
                 Set refWorksheet = extWorkbook.Sheets(worksheetName)
                 Set refCell = refWorksheet.Range(cellReference)
                 
-                ' Log the details of the referenced cell
+                ' Log the referenced cell details
                 logSheet.Cells(logRow, 1).Value = extWorkbook.Name
                 logSheet.Cells(logRow, 2).Value = refWorksheet.Name
                 logSheet.Cells(logRow, 3).Value = refCell.Address
-                logSheet.Cells(logRow, 4).Value = refCell.Formula ' Log the formula
-                logSheet.Cells(logRow, 5).Value = refCell.Value ' Log the value
+                logSheet.Cells(logRow, 4).Value = refCell.Formula ' Log the formula in the referenced cell
+                logSheet.Cells(logRow, 5).Value = refCell.Value ' Log the value in the referenced cell
                 logRow = logRow + 1
                 
-                ' If the referenced cell also contains a formula, continue tracing
-                If refCell.Formula <> "" Then
-                    TraceExternalWorkbookReferences refCell.Formula, logSheet, logRow
+                ' Recursively trace if the referenced cell contains another formula
+                If refCell.HasFormula Then
+                    TraceReferences refCell, logSheet, logRow
                 End If
                 
                 ' Close the external workbook after processing
@@ -97,5 +99,28 @@ Sub TraceExternalWorkbookReferences(ByVal formula As String, ByRef logSheet As W
                 logRow = logRow + 1
             End If
         Next match
+    Else
+        ' Handle internal references (within the same workbook)
+        Dim cellRef As Range
+        On Error Resume Next
+        Set cellRef = sourceCell.Precedents ' Get the precedents (cells referenced by the formula)
+        On Error GoTo 0
+        
+        If Not cellRef Is Nothing Then
+            For Each refCell In cellRef
+                ' Log the internal referenced cell
+                logSheet.Cells(logRow, 1).Value = ThisWorkbook.Name
+                logSheet.Cells(logRow, 2).Value = refCell.Worksheet.Name
+                logSheet.Cells(logRow, 3).Value = refCell.Address
+                logSheet.Cells(logRow, 4).Value = refCell.Formula ' Log the formula
+                logSheet.Cells(logRow, 5).Value = refCell.Value ' Log the value
+                logRow = logRow + 1
+                
+                ' If the referenced cell also has a formula, trace it recursively
+                If refCell.HasFormula Then
+                    TraceReferences refCell, logSheet, logRow
+                End If
+            Next refCell
+        End If
     End If
 End Sub
