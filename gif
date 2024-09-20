@@ -1,1 +1,163 @@
 
+import xlwings as xw
+import os
+import re
+
+def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells=None):
+    """
+    This function handles the tracing of formulas for all the cells in a given range.
+    It returns the complete trace of formula resolutions for the entire range.
+    """
+    trace = []
+    
+    # Initialize visited_cells set to detect circular references
+    if visited_cells is None:
+        visited_cells = set()
+
+    # Check if the workbook exists
+    if not os.path.exists(workbook_path):
+        raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
+    
+    # Open the workbook with xlwings
+    app = xw.App(visible=False)  # We don't need the Excel window to pop up
+    try:
+        wb = app.books.open(workbook_path)
+        sheet = wb.sheets[sheet_name]
+        
+        # Loop through each cell in the range
+        for cell in sheet.range(cell_range):
+            cell_reference = cell.get_address(False, False)  # Get the address in A1 notation
+            print(f"Processing cell: {cell_reference}")  # Progress tracking
+            
+            cell_trace = get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells)
+            trace.extend(cell_trace)  # Append each cell trace to the overall trace
+        
+        return trace
+    
+    finally:
+        wb.close()
+        app.quit()
+
+def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, trace=None):
+    """
+    This function uses xlwings to get the formula of a cell and traces the formula references step by step.
+    It returns the complete trace of the formula resolution.
+    """
+    # Initialize the trace if it's not provided
+    if trace is None:
+        trace = []
+
+    # Track the current cell to detect circular references
+    cell_id = (workbook_path, sheet_name, cell_reference)
+    
+    if cell_id in visited_cells:
+        trace.append({
+            'workbook': workbook_path,
+            'sheet': sheet_name,
+            'cell': cell_reference,
+            'formula': None,
+            'value': 'Circular Reference Detected'
+        })
+        return trace
+    
+    visited_cells.add(cell_id)
+
+    # Check if the workbook exists
+    if not os.path.exists(workbook_path):
+        raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
+    
+    # Open the workbook with xlwings
+    app = xw.App(visible=False)  # We don't need the Excel window to pop up
+    try:
+        wb = app.books.open(workbook_path)
+        sheet = wb.sheets[sheet_name]
+        
+        # Get the formula of the cell. If the cell contains no formula, formula will be None.
+        formula = sheet.range(cell_reference).formula
+        value = sheet.range(cell_reference).value
+        
+        # Append the current cell's details to the trace
+        trace.append({
+            'workbook': workbook_path,
+            'sheet': sheet_name,
+            'cell': cell_reference,
+            'formula': formula,  # We track the formula here, not the value
+            'value': value if formula is None else None  # Only add value if there's no formula
+        })
+        
+        # If the cell has a formula, trace the referenced cells
+        if formula:
+            # Parse the formula to extract references
+            references = parse_formula_references(formula, workbook_path)
+            
+            # For each referenced cell, resolve its formula and trace it
+            for ref in references:
+                ref_workbook_path, ref_sheet, ref_cell = ref
+                get_cell_trace_xlwings(ref_workbook_path, ref_sheet, ref_cell, visited_cells, trace)
+        
+        return trace
+    
+    finally:
+        wb.close()
+        app.quit()
+
+
+def parse_formula_references(formula, current_workbook):
+    """
+    This function parses the formula and extracts the references to other cells.
+    It handles:
+    - Intra-workbook references like 'Sheet1!A1'
+    - External workbook references like '[Workbook.xlsx]Sheet1!A1'
+    """
+    references = []
+    
+    # Regex to capture cell references in formulas:
+    # Matches intra-sheet references: Sheet1!A1 or Sheet1!$A$1
+    # Matches cross-workbook references: [Workbook.xlsx]Sheet1!A1
+    pattern = r"(\[.+?\])?(\w+)!([A-Z]+\d+|\$[A-Z]+\$[0-9]+)"
+    
+    matches = re.findall(pattern, formula)
+    
+    for match in matches:
+        ext_wb, sheet_name, cell_ref = match
+        
+        if ext_wb:
+            # If there is an external workbook reference, clean it up and resolve the path
+            ext_wb = ext_wb.strip('[]')
+            ext_workbook_path = os.path.join(os.path.dirname(current_workbook), ext_wb)
+        else:
+            ext_workbook_path = current_workbook
+        
+        # Clean up any dollar signs in the cell reference (if absolute references are used)
+        cell_ref = cell_ref.replace('$', '')
+        
+        references.append((ext_workbook_path, sheet_name, cell_ref))
+    
+    return references
+
+
+def find_formula_trace_for_range(workbook_path, sheet_name, cell_range):
+    """
+    This function traces the formula references for all cells in a given range and returns the full trace.
+    """
+    try:
+        trace = get_range_trace_xlwings(workbook_path, sheet_name, cell_range)
+        # Print the trace for each step
+        for step in trace:
+            print(f"Workbook: {step['workbook']}, Sheet: {step['sheet']}, "
+                  f"Cell: {step['cell']}, Formula: {step['formula']}, Value: {step['value']}")
+        return trace
+    except Exception as e:
+        return f"Error encountered: {str(e)}"
+
+
+# Example usage:
+workbook_path = r'\\network_drive\path\to\your\workbook.xlsx'
+sheet_name = 'Sheet1'
+cell_range = 'A1:A5'  # Start with a small range for testing
+
+trace = find_formula_trace_for_range(workbook_path, sheet_name, cell_range)
+
+# You can print or inspect the full trace of the formula resolution
+for step in trace:
+    print(step)
