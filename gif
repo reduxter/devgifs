@@ -12,7 +12,7 @@ def open_all_workbooks(workbook_paths, app):
         if os.path.exists(path):
             try:
                 print(f"Opening workbook: {path}")
-                wb = app.books.open(path)
+                wb = app.books.open(path, update_links=True)  # Open workbook with links updated
                 opened_workbooks[path] = wb
             except Exception as e:
                 print(f"Error opening workbook {path}: {e}")
@@ -32,7 +32,7 @@ def get_all_referenced_workbooks(workbook_path, app, sheet_name, cell_range):
         sheet = wb.sheets[sheet_name]
         for cell in sheet.range(cell_range):
             cell_reference = cell.get_address(False, False)
-            formula = cell.formula
+            formula = cell.formula  # Fetch the formula
             if formula:
                 workbooks_in_formula = parse_external_workbook_references(formula, workbook_path)
                 referenced_workbooks.update(workbooks_in_formula)
@@ -70,9 +70,14 @@ def trace_formulas_in_range(workbook_path, sheet_name, cell_range, app, opened_w
     # Loop through each cell in the range and trace its formula
     for cell in sheet.range(cell_range):
         cell_reference = cell.get_address(False, False)
-        formula = cell.formula
+
+        # Fetch formula with .formula2 for better consistency with complex formulas
+        formula = cell.formula2
         value = cell.value
         
+        # Recalculate to make sure all external links and dependencies are updated
+        app.calculate()
+
         trace.append({
             'workbook': workbook_path,
             'sheet': sheet_name,
