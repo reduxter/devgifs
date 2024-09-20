@@ -3,193 +3,155 @@ import os
 import re
 import time
 
-def retry_operation(func, retries=3, delay=1):
+def open_all_workbooks(workbook_paths, app):
     """
-    Retries a given function multiple times with a delay in case of COM errors.
-    This helps handle scenarios where Excel is temporarily busy.
+    Open all necessary workbooks and return a dictionary of workbook objects.
     """
-    for attempt in range(retries):
-        try:
-            return func()
-        except Exception as e:
-            print(f"Retrying due to error: {e}")
-            time.sleep(delay)
-            if attempt == retries - 1:
-                raise
+    opened_workbooks = {}
+    for path in workbook_paths:
+        if os.path.exists(path):
+            try:
+                print(f"Opening workbook: {path}")
+                wb = app.books.open(path)
+                opened_workbooks[path] = wb
+            except Exception as e:
+                print(f"Error opening workbook {path}: {e}")
+        else:
+            print(f"Workbook not found: {path}")
+    return opened_workbooks
 
-def get_range_trace_xlwings(workbook_path, sheet_name, cell_range, visited_cells=None, opened_workbooks=None):
+def get_all_referenced_workbooks(workbook_path, app, sheet_name, cell_range):
     """
-    This function handles the tracing of formulas for all the cells in a given range.
-    It returns the complete trace of formula resolutions for the entire range.
+    Find all referenced external workbooks from a given range of cells.
+    """
+    referenced_workbooks = set()
+    
+    # Open the workbook
+    try:
+        wb = app.books.open(workbook_path)
+        sheet = wb.sheets[sheet_name]
+        for cell in sheet.range(cell_range):
+            cell_reference = cell.get_address(False, False)
+            formula = cell.formula
+            if formula:
+                workbooks_in_formula = parse_external_workbook_references(formula, workbook_path)
+                referenced_workbooks.update(workbooks_in_formula)
+        wb.close()
+    except Exception as e:
+        print(f"Error while fetching referenced workbooks from {workbook_path}: {e}")
+    
+    return referenced_workbooks
+
+def parse_external_workbook_references(formula, current_workbook):
+    """
+    Extract external workbook references from a formula.
+    """
+    external_workbooks = set()
+    pattern = r"(\[.+?\])"  # Capture anything within brackets, like [Workbook.xlsx]
+    matches = re.findall(pattern, formula)
+    
+    for match in matches:
+        ext_workbook_name = match.strip('[]')
+        ext_workbook_path = os.path.join(os.path.dirname(current_workbook), ext_workbook_name)
+        external_workbooks.add(ext_workbook_path)
+    
+    return external_workbooks
+
+def trace_formulas_in_range(workbook_path, sheet_name, cell_range, app, opened_workbooks):
+    """
+    Traces formulas for a given range of cells in a workbook and returns the full trace.
     """
     trace = []
     
-    # Initialize visited_cells set to detect circular references
-    if visited_cells is None:
-        visited_cells = set()
-    
-    # Initialize a dictionary to track opened workbooks
-    if opened_workbooks is None:
-        opened_workbooks = {}
+    # Open the main workbook
+    wb = opened_workbooks[workbook_path]
+    sheet = wb.sheets[sheet_name]
 
-    # Check if the workbook exists
-    if not os.path.exists(workbook_path):
-        raise FileNotFoundError(f"Workbook '{workbook_path}' not found.")
-    
-    # Open the workbook with xlwings, with retry logic to handle Excel's busy state
-    app = xw.App(visible=False)
-    try:
-        wb = retry_operation(lambda: app.books.open(workbook_path))
-        sheet = wb.sheets[sheet_name]
+    # Loop through each cell in the range and trace its formula
+    for cell in sheet.range(cell_range):
+        cell_reference = cell.get_address(False, False)
+        formula = cell.formula
+        value = cell.value
         
-        # Loop through each cell in the range
-        for cell in sheet.range(cell_range):
-            cell_reference = cell.get_address(False, False)  # Get the address in A1 notation
-            print(f"Processing cell: {cell_reference}")  # Progress tracking
-            
-            cell_trace = get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, app, opened_workbooks)
-            trace.extend(cell_trace)  # Append each cell trace to the overall trace
-        
-        return trace
-    
-    finally:
-        # Close the main workbook and any opened external workbooks
-        close_workbooks(opened_workbooks, app)
-        retry_operation(wb.close)  # Close the main workbook with retry logic
-        app.quit()
-
-def close_workbooks(opened_workbooks, app):
-    """
-    Gracefully closes the opened external workbooks with error handling to avoid -2147417848 errors.
-    """
-    for wb_path, wb in list(opened_workbooks.items()):
-        try:
-            print(f"Closing workbook: {wb_path}")
-            time.sleep(1)  # Adding a small delay before closing
-            retry_operation(wb.close)  # Retry closing the workbook if needed
-            del opened_workbooks[wb_path]  # Remove from dictionary once closed
-        except Exception as e:
-            print(f"Error closing workbook {wb_path}: {str(e)}")
-
-def get_cell_trace_xlwings(workbook_path, sheet_name, cell_reference, visited_cells, app, opened_workbooks, trace=None):
-    """
-    This function uses xlwings to get the formula of a cell and traces the formula references step by step.
-    It returns the complete trace of the formula resolution, including external workbook references.
-    """
-    # Initialize the trace if it's not provided
-    if trace is None:
-        trace = []
-
-    # Track the current cell to detect circular references
-    cell_id = (workbook_path, sheet_name, cell_reference)
-    
-    if cell_id in visited_cells:
         trace.append({
             'workbook': workbook_path,
             'sheet': sheet_name,
             'cell': cell_reference,
-            'formula': None,
-            'value': 'Circular Reference Detected'
+            'formula': formula if formula else None,
+            'value': value if not formula else None
         })
-        return trace
-    
-    visited_cells.add(cell_id)
-
-    # If the workbook is already open, use it. Otherwise, open it.
-    if workbook_path in opened_workbooks:
-        wb = opened_workbooks[workbook_path]
-    else:
-        wb = retry_operation(lambda: app.books.open(workbook_path))
-        opened_workbooks[workbook_path] = wb
-
-    sheet = wb.sheets[sheet_name]
-    
-    # Get the formula explicitly (use .formula to fetch the actual formula)
-    formula = sheet.range(cell_reference).formula
-    value = sheet.range(cell_reference).value
-    
-    # Append the current cell's details to the trace
-    trace.append({
-        'workbook': workbook_path,
-        'sheet': sheet_name,
-        'cell': cell_reference,
-        'formula': formula if formula else None,  # Ensuring formula is fetched correctly
-        'value': value if formula is None else None  # Only add value if there's no formula
-    })
-    
-    # If the cell has a formula, trace the referenced cells
-    if formula:
-        # Parse the formula to extract references
-        references = parse_formula_references(formula, workbook_path)
         
-        # For each referenced cell, resolve its formula and trace it
-        for ref in references:
-            ref_workbook_path, ref_sheet, ref_cell = ref
-            
-            # If it's an external workbook, ensure it is opened
-            if ref_workbook_path not in opened_workbooks:
-                try:
-                    opened_workbooks[ref_workbook_path] = retry_operation(lambda: app.books.open(ref_workbook_path))
-                    time.sleep(1)  # Add a delay to avoid overwhelming Excel
-                except Exception as e:
-                    print(f"Error opening external workbook {ref_workbook_path}: {str(e)}")
-                    continue
-                
-            # Recursively trace the formula in the referenced workbook/sheet/cell
-            get_cell_trace_xlwings(ref_workbook_path, ref_sheet, ref_cell, visited_cells, app, opened_workbooks, trace)
+        if formula:
+            # Parse and trace the formula's references
+            references = parse_formula_references(formula, workbook_path)
+            for ref_workbook_path, ref_sheet_name, ref_cell in references:
+                if ref_workbook_path in opened_workbooks:
+                    trace.extend(trace_formulas_in_range(ref_workbook_path, ref_sheet_name, ref_cell, app, opened_workbooks))
     
     return trace
 
-
 def parse_formula_references(formula, current_workbook):
     """
-    This function parses the formula and extracts the references to other cells.
-    It handles:
-    - Intra-workbook references like 'Sheet1!A1'
-    - External workbook references like '[Workbook.xlsx]Sheet1!A1'
+    Parses formulas to extract references to other cells, including cross-workbook references.
     """
     references = []
-    
-    # Regex to capture cell references in formulas:
-    # Matches intra-sheet references: Sheet1!A1 or Sheet1!$A$1
-    # Matches cross-workbook references: [Workbook.xlsx]Sheet1!A1
-    pattern = r"(\[.+?\])?(\w+)!([A-Z]+\d+|\$[A-Z]+\$[0-9]+)"
+    pattern = r"(\[.+?\])?(\w+)!([A-Z]+\d+)"
     
     matches = re.findall(pattern, formula)
-    
     for match in matches:
         ext_wb, sheet_name, cell_ref = match
         
         if ext_wb:
-            # If there is an external workbook reference, clean it up and resolve the path
-            ext_wb = ext_wb.strip('[]')
-            ext_workbook_path = os.path.join(os.path.dirname(current_workbook), ext_wb)
+            ext_workbook_name = ext_wb.strip('[]')
+            ext_workbook_path = os.path.join(os.path.dirname(current_workbook), ext_workbook_name)
         else:
             ext_workbook_path = current_workbook
-        
-        # Clean up any dollar signs in the cell reference (if absolute references are used)
-        cell_ref = cell_ref.replace('$', '')
         
         references.append((ext_workbook_path, sheet_name, cell_ref))
     
     return references
 
+def close_all_workbooks(opened_workbooks):
+    """
+    Close all opened workbooks.
+    """
+    for path, wb in opened_workbooks.items():
+        try:
+            print(f"Closing workbook: {path}")
+            wb.close()
+        except Exception as e:
+            print(f"Error closing workbook {path}: {e}")
 
 def find_formula_trace_for_range(workbook_path, sheet_name, cell_range):
     """
-    This function traces the formula references for all cells in a given range and returns the full trace.
+    Main function to trace formulas for all cells in a given range, including handling cross-workbook references.
     """
+    app = xw.App(visible=False)
+    
     try:
-        trace = get_range_trace_xlwings(workbook_path, sheet_name, cell_range)
-        # Print the trace for each step
+        # Find all referenced external workbooks
+        referenced_workbooks = get_all_referenced_workbooks(workbook_path, app, sheet_name, cell_range)
+        
+        # Add the main workbook to the list of workbooks to open
+        referenced_workbooks.add(workbook_path)
+        
+        # Open all necessary workbooks
+        opened_workbooks = open_all_workbooks(referenced_workbooks, app)
+        
+        # Trace the formulas
+        trace = trace_formulas_in_range(workbook_path, sheet_name, cell_range, app, opened_workbooks)
+        
+        # Print the trace
         for step in trace:
             print(f"Workbook: {step['workbook']}, Sheet: {step['sheet']}, "
                   f"Cell: {step['cell']}, Formula: {step['formula']}, Value: {step['value']}")
+        
         return trace
     except Exception as e:
-        print(f"Error encountered: {str(e)}")
-        return None
-
+        print(f"Error during formula tracing: {e}")
+    finally:
+        close_all_workbooks(opened_workbooks)
+        app.quit()
 
 # Example usage:
 workbook_path = r'\\network_drive\path\to\your\workbook.xlsx'
