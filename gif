@@ -1,15 +1,14 @@
-import openpyxl
+import xlwings as xw
 import os
-import re
 
-def open_workbook(workbook_path):
+def open_workbook_with_links(workbook_path):
     """
-    Open an Excel workbook using openpyxl.
+    Open a workbook in Excel with links updated and force recalculation.
     """
     if os.path.exists(workbook_path):
         try:
             print(f"Opening workbook: {workbook_path}")
-            wb = openpyxl.load_workbook(workbook_path, data_only=False)  # Load with formulas
+            wb = xw.Book(workbook_path, update_links=True)  # Open workbook with links updated
             return wb
         except Exception as e:
             print(f"Error opening workbook {workbook_path}: {e}")
@@ -18,82 +17,52 @@ def open_workbook(workbook_path):
         print(f"Workbook not found: {workbook_path}")
         return None
 
-def extract_formula(cell):
+def update_links_and_recalculate(workbook):
     """
-    Extract the formula from an openpyxl cell object.
+    Force Excel to update links and recalculate all formulas.
     """
-    return cell.value if isinstance(cell.value, str) and cell.value.startswith('=') else None
+    try:
+        workbook.app.calculate()  # Trigger recalculation
+        print("Workbook recalculated successfully.")
+    except Exception as e:
+        print(f"Error during recalculation: {e}")
 
-def trace_formulas_in_range(workbook_path, sheet_name, cell_range):
+def get_cell_value(workbook, sheet_name, cell_address):
     """
-    Trace formulas for a given range of cells in an Excel workbook using openpyxl.
+    Get the value of a specific cell after recalculating formulas.
     """
+    sheet = workbook.sheets[sheet_name]
+    cell_value = sheet.range(cell_address).value  # Get evaluated value after recalculation
+    formula = sheet.range(cell_address).formula  # Fetch formula if needed
+
+    return {
+        'cell': cell_address,
+        'formula': formula,
+        'value': cell_value
+    }
+
+def trace_formulas_after_recalculation(workbook_path, sheet_name, cell_range):
+    """
+    Trace formulas in a specified range after recalculating the workbook.
+    """
+    workbook = open_workbook_with_links(workbook_path)
+    if not workbook:
+        return []
+
+    # Force recalculation after opening the workbook with links
+    update_links_and_recalculate(workbook)
+
     trace = []
+    sheet = workbook.sheets[sheet_name]
 
-    # Open the workbook
-    wb = open_workbook(workbook_path)
-    if not wb:
-        return trace  # If workbook couldn't be opened, return empty trace
+    # Loop through the specified range and extract the formulas and values
+    for cell in sheet.range(cell_range):
+        cell_address = cell.get_address(False, False)
+        trace.append(get_cell_value(workbook, sheet_name, cell_address))
 
-    # Get the sheet
-    sheet = wb[sheet_name]
+    # Close the workbook after extracting data
+    workbook.close()
 
-    # Loop through each cell in the range and trace its formula
-    for row in sheet[cell_range]:
-        for cell in row:
-            cell_reference = f"{cell.column_letter}{cell.row}"  # Get cell address
-
-            formula = extract_formula(cell)
-            value = cell.value  # Openpyxl cannot evaluate formulas; this is either a value or the formula string
-
-            trace.append({
-                'workbook': workbook_path,
-                'sheet': sheet_name,
-                'cell': cell_reference,
-                'formula': formula,
-                'value': value if not formula else None
-            })
-    
-    return trace
-
-def parse_external_workbook_references(formula):
-    """
-    Extract external workbook references from a formula string.
-    """
-    external_workbooks = set()
-    pattern = r"(\[.+?\])"  # Capture anything within brackets, like [Workbook.xlsx]
-    matches = re.findall(pattern, formula)
-    
-    for match in matches:
-        ext_workbook_name = match.strip('[]')
-        external_workbooks.add(ext_workbook_name)
-    
-    return external_workbooks
-
-def trace_all_formulas_with_references(workbook_path, sheet_name, cell_range):
-    """
-    Trace all formulas, including logging external references, across a range in a workbook.
-    """
-    # Start by extracting formulas in the main workbook
-    trace = trace_formulas_in_range(workbook_path, sheet_name, cell_range)
-
-    external_workbook_references = set()
-    for step in trace:
-        formula = step.get('formula')
-        if formula:
-            external_workbook_references.update(parse_external_workbook_references(formula))
-
-    # Log external workbook references
-    if external_workbook_references:
-        print("External workbook references found:")
-        for ext_ref in external_workbook_references:
-            print(f"External workbook reference: {ext_ref}")
-
-    # Print the formula trace
-    for step in trace:
-        print(f"Workbook: {step['workbook']}, Sheet: {step['sheet']}, "
-              f"Cell: {step['cell']}, Formula: {step['formula']}, Value: {step['value']}")
-    
     return trace
 
 # Example usage:
@@ -101,8 +70,8 @@ workbook_path = r'\\network_drive\path\to\your\workbook.xlsx'
 sheet_name = 'Sheet1'
 cell_range = 'A1:B10'  # Range for testing
 
-trace = trace_all_formulas_with_references(workbook_path, sheet_name, cell_range)
+trace = trace_formulas_after_recalculation(workbook_path, sheet_name, cell_range)
 
-# Inspect the trace
+# Print the final trace after recalculation
 for step in trace:
-    print(step)
+    print(f"Cell: {step['cell']}, Formula: {step['formula']}, Value: {step['value']}")
