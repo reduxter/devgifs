@@ -69,14 +69,14 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
             worksheetName = match.SubMatches(1) ' Extract the worksheet name
             cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Resolve the file path: only add the current workbook path if it's a relative path
+            ' Resolve the path: check if it's a full or relative path
             If IsFullPath(workbookReference) Then
                 resolvedPath = workbookReference ' Use the full path as-is
             Else
-                resolvedPath = Application.ThisWorkbook.Path & "\" & workbookReference ' Append current workbook path
+                resolvedPath = ThisWorkbook.Path & "\" & workbookReference ' Append current workbook path for relative paths
             End If
             
-            ' Try to resolve the path and check if it's already open
+            ' Try to open the resolved path and check if it's already open
             If IsWorkbookOpen(resolvedPath) Then
                 Set extWorkbook = Workbooks(resolvedPath)
             Else
@@ -139,14 +139,7 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
     End If
 End Sub
 
-' Custom function to resolve file path using Excel's ThisWorkbook.Path to resolve relative paths
-Function ResolveFilePath(ByVal filePath As String) As String
-    Dim fullResolvedPath As String
-    fullResolvedPath = filePath
-    ResolveFilePath = fullResolvedPath
-End Function
-
-' Function to check if a workbook is already open
+' Custom function to check if a workbook is already open
 Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
     Dim wb As Workbook
     On Error Resume Next
