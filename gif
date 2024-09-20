@@ -69,13 +69,10 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
             worksheetName = match.SubMatches(1) ' Extract the worksheet name
             cellReference = match.SubMatches(2) ' Extract the cell reference
             
-            ' Ensure that we have the full path, not just a partial one
-            If Not IsFullPath(workbookReference) Then
-                workbookReference = Application.ThisWorkbook.Path & "\" & workbookReference
-            End If
+            ' Use the full path from the formula without modifying it
+            resolvedPath = workbookReference
             
-            ' Try to resolve the path and check if it's already open
-            resolvedPath = ResolveFilePath(workbookReference)
+            ' Check if the workbook is already open
             If IsWorkbookOpen(resolvedPath) Then
                 Set extWorkbook = Workbooks(resolvedPath)
             Else
@@ -138,13 +135,6 @@ Sub TraceReferences(ByVal sourceCell As Range, ByRef logSheet As Worksheet, ByRe
     End If
 End Sub
 
-' Custom function to resolve file path using Excel's ThisWorkbook.Path to resolve relative paths
-Function ResolveFilePath(ByVal filePath As String) As String
-    Dim fullResolvedPath As String
-    fullResolvedPath = filePath
-    ResolveFilePath = fullResolvedPath
-End Function
-
 ' Function to check if a workbook is already open
 Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
     Dim wb As Workbook
@@ -156,13 +146,4 @@ Function IsWorkbookOpen(ByVal workbookName As String) As Boolean
         IsWorkbookOpen = True
     End If
     On Error GoTo 0
-End Function
-
-' Function to check if a path is a full path or a partial path
-Function IsFullPath(ByVal path As String) As Boolean
-    If InStr(1, path, ":", vbTextCompare) > 0 Or InStr(1, path, "\\", vbTextCompare) > 0 Then
-        IsFullPath = True
-    Else
-        IsFullPath = False
-    End If
 End Function
