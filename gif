@@ -1,15 +1,14 @@
-
 import win32com.client
 import re
 import os
 
 def extract_references_from_formula(formula):
     """Extracts cell references, including external workbook references."""
-    # Matches references like '[workbook.xlsx]Sheet!A1'
-    return re.findall(r"'\[(.*?)\](.*?)'!\$?([A-Z]+\$?\d+)", formula)
+    # Matches references like '[workbook.xlsx]Sheet!A1' or internal ones like 'Sheet!A1'
+    return re.findall(r"'\[(.*?)\](.*?)'!\$?([A-Z]+\$?\d+)", formula) or re.findall(r"([A-Z]+[0-9]+)", formula)
 
 def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None):
-    """Recursively traces the formula path until a raw value is found."""
+    """Recursively traces the formula path across multiple workbooks until a raw value is found."""
     if path is None:
         path = []
 
@@ -22,27 +21,28 @@ def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None)
     # Log the current formula and value
     path.append((workbook.Name, sheet_name, cell_address, formula, value))
 
-    # If the cell has a formula, we need to trace it
+    # If the cell contains a formula, trace it further
     if formula and formula != cell_address:
-        # Extract references to other workbooks and sheets
+        # Extract references (internal or external)
         references = extract_references_from_formula(formula)
 
         for ref in references:
-            workbook_file, ref_sheet_name, ref_cell = ref
-            # Construct the full path from the formula reference
-            # Modify the base directory as needed or dynamically detect from the formula
-            workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q1", workbook_file)  # Example base path
-            
-            # Check if the external workbook exists
-            if os.path.exists(workbook_path):
-                external_workbook = open_workbook(excel_app, workbook_path)
-                if external_workbook:
-                    # Recursively trace the formula in the external workbook
-                    trace_formula_path(excel_app, external_workbook, ref_sheet_name, ref_cell, path)
+            if isinstance(ref, tuple):  # External workbook reference
+                workbook_file, ref_sheet_name, ref_cell = ref
+                # Construct the full path from the formula reference
+                workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q1", workbook_file)
+
+                if os.path.exists(workbook_path):
+                    external_workbook = open_workbook(excel_app, workbook_path)
+                    if external_workbook:
+                        # Recursively trace the formula in the external workbook
+                        trace_formula_path(excel_app, external_workbook, ref_sheet_name, ref_cell, path)
+                    else:
+                        path.append((workbook_file, ref_sheet_name, ref_cell, "Error: Could not open external workbook", None))
                 else:
-                    path.append((workbook_file, ref_sheet_name, ref_cell, "Error: Could not open external workbook", None))
-            else:
-                path.append((workbook_file, ref_sheet_name, ref_cell, "Error: Workbook not found", None))
+                    path.append((workbook_file, ref_sheet_name, ref_cell, "Error: Workbook not found", None))
+            else:  # Internal reference within the same workbook
+                trace_formula_path(excel_app, workbook, sheet_name, ref, path)
 
     return path
 
@@ -57,7 +57,6 @@ def open_workbook(excel_app, workbook_path):
 
 def trace_workbook(excel_app, workbook_path, sheet_name, cell_range):
     """Traces all cells in the given range and outputs the nesting details."""
-    # Open the primary workbook
     workbook = open_workbook(excel_app, workbook_path)
     if not workbook:
         print(f"Unable to open the workbook at {workbook_path}")
