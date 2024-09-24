@@ -4,9 +4,11 @@ import os
 import time
 
 def extract_references_from_formula(formula):
-    """Extracts both internal and external references from a formula."""
-    # Matches references like '[workbook.xlsx]Sheet!A1' or internal ones like 'Sheet!A1'
-    return re.findall(r"'\[(.*?)\](.*?)'!\$?([A-Z]+\$?\d+)", formula) or re.findall(r"([A-Z]+[0-9]+)", formula)
+    """Extract both internal and external references from a formula."""
+    # Matches references like '[workbook.xlsx]Sheet!A1' (external) or 'Sheet!A1' (internal)
+    external_ref = re.findall(r"'\[(.*?)\](.*?)'!\$?([A-Z]+\$?\d+)", formula)
+    internal_ref = re.findall(r"([A-Z]+[0-9]+)", formula)
+    return external_ref or internal_ref
 
 def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None):
     """Recursively traces the formula path across multiple workbooks until a raw value is found."""
@@ -19,7 +21,7 @@ def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None)
     formula = cell.Formula
     value = cell.Value
 
-    # Log the current formula and value
+    # Log the current workbook, sheet, cell, formula, and value
     path.append((workbook.Name, sheet_name, cell_address, formula, value))
 
     # If the cell contains a formula, trace it further
@@ -30,13 +32,13 @@ def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None)
         for ref in references:
             if isinstance(ref, tuple):  # External workbook reference
                 workbook_file, ref_sheet_name, ref_cell = ref
-                # Construct the full path from the formula reference
-                workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q3", workbook_file)  # Update this path as needed
+                # Construct the full path from the formula reference (you may need to adjust the base path)
+                workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q3", workbook_file)
 
                 if os.path.exists(workbook_path):
                     external_workbook = open_workbook_with_retry(excel_app, workbook_path)
                     if external_workbook:
-                        # Recursively trace the formula in the external workbook
+                        # Recursively trace the formula in the external workbook and ensure correct workbook/sheet context
                         trace_formula_path(excel_app, external_workbook, ref_sheet_name, ref_cell, path)
                     else:
                         path.append((workbook_file, ref_sheet_name, ref_cell, "Error: Could not open external workbook", None))
