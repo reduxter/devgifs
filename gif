@@ -1,9 +1,10 @@
 import win32com.client
 import re
 import os
+import time
 
 def extract_references_from_formula(formula):
-    """Extracts cell references, including external workbook references."""
+    """Extracts both internal and external references from a formula."""
     # Matches references like '[workbook.xlsx]Sheet!A1' or internal ones like 'Sheet!A1'
     return re.findall(r"'\[(.*?)\](.*?)'!\$?([A-Z]+\$?\d+)", formula) or re.findall(r"([A-Z]+[0-9]+)", formula)
 
@@ -30,10 +31,10 @@ def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None)
             if isinstance(ref, tuple):  # External workbook reference
                 workbook_file, ref_sheet_name, ref_cell = ref
                 # Construct the full path from the formula reference
-                workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q1", workbook_file)
+                workbook_path = os.path.join("L:\\Data\\Data2\\Act\\Q3", workbook_file)  # Update this path as needed
 
                 if os.path.exists(workbook_path):
-                    external_workbook = open_workbook(excel_app, workbook_path)
+                    external_workbook = open_workbook_with_retry(excel_app, workbook_path)
                     if external_workbook:
                         # Recursively trace the formula in the external workbook
                         trace_formula_path(excel_app, external_workbook, ref_sheet_name, ref_cell, path)
@@ -46,18 +47,29 @@ def trace_formula_path(excel_app, workbook, sheet_name, cell_address, path=None)
 
     return path
 
-def open_workbook(excel_app, workbook_path):
-    """Opens a workbook if it's not already open."""
-    try:
-        workbook = excel_app.Workbooks.Open(workbook_path)
-        return workbook
-    except Exception as e:
-        print(f"Error opening workbook {workbook_path}: {str(e)}")
-        return None
+def open_workbook_with_retry(excel_app, workbook_path, retries=3, wait_time=20):
+    """
+    Attempts to open a workbook with retries. If it takes too long, waits and retries.
+    - retries: The number of times to retry opening the workbook.
+    - wait_time: The time (in seconds) to wait between retries.
+    """
+    attempt = 0
+    workbook = None
+    while attempt < retries:
+        try:
+            workbook = excel_app.Workbooks.Open(workbook_path)
+            return workbook
+        except Exception as e:
+            print(f"Attempt {attempt + 1} - Error opening workbook {workbook_path}: {str(e)}")
+            attempt += 1
+            time.sleep(wait_time)
+    
+    print(f"Failed to open workbook {workbook_path} after {retries} attempts.")
+    return None
 
 def trace_workbook(excel_app, workbook_path, sheet_name, cell_range):
     """Traces all cells in the given range and outputs the nesting details."""
-    workbook = open_workbook(excel_app, workbook_path)
+    workbook = open_workbook_with_retry(excel_app, workbook_path)
     if not workbook:
         print(f"Unable to open the workbook at {workbook_path}")
         return None
